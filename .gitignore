@@ -1,0 +1,13 @@
+# Virtual environment
+ezAnalyze/
+
+# Python cache files
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# User data and exports
+data/
+reports/
+plots/
+exports/
