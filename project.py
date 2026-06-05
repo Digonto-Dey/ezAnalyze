@@ -1,19 +1,3 @@
-"""
-ezAnalysis: Research Data Analysis Toolkit
-==========================================
-A terminal-based Python application that performs comprehensive
-statistical analysis on any user-provided CSV dataset.
-
-Modules:
-    1. Dataset Import          6. Data Visualization
-    2. Dataset Summary         7. Correlation Analysis
-    3. Missing Value Analysis  8. Hypothesis Testing
-    4. Descriptive Statistics  9. Automatic Report Generation
-    5. Frequency Distribution  10. Export Results
-
-CS50P Final Project — Harvard University
-"""
-
 import os
 import sys
 from pathlib import Path
@@ -27,9 +11,9 @@ import pandas as pd
 from scipy import stats
 
 
-# ──────────────────────────────────────────────
+
 #  Constants
-# ──────────────────────────────────────────────
+
 ALPHA = 0.05  # Significance level for hypothesis tests
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -63,18 +47,15 @@ MENU_TEXT = """
 """
 
 
-# ──────────────────────────────────────────────
+
 #  Setup
-# ──────────────────────────────────────────────
 def ensure_directories() -> None:
     """Create output directories if they do not exist."""
     for directory in (DATA_DIR, REPORTS_DIR, PLOTS_DIR, EXPORTS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
-# ──────────────────────────────────────────────
 #  Module 1: Dataset Import
-# ──────────────────────────────────────────────
 def load_dataset(filepath: str) -> pd.DataFrame:
     """
     Load a CSV file and return a pandas DataFrame.
@@ -114,9 +95,8 @@ def load_dataset(filepath: str) -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────
+
 #  Module 2: Dataset Summary
-# ──────────────────────────────────────────────
 def dataset_summary(df: pd.DataFrame) -> str:
     """
     Print and return a textual overview of the dataset.
@@ -150,9 +130,7 @@ def dataset_summary(df: pd.DataFrame) -> str:
     return summary_text
 
 
-# ──────────────────────────────────────────────
 #  Module 3: Missing Value Analysis
-# ──────────────────────────────────────────────
 def missing_value_analysis(df: pd.DataFrame) -> dict:
     """
     Analyze missing values in every column.
@@ -188,9 +166,8 @@ def missing_value_analysis(df: pd.DataFrame) -> dict:
     return result
 
 
-# ──────────────────────────────────────────────
+
 #  Module 4: Descriptive Statistics
-# ──────────────────────────────────────────────
 def descriptive_statistics(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute descriptive statistics for every numeric column.
@@ -241,9 +218,8 @@ def descriptive_statistics(df: pd.DataFrame) -> pd.DataFrame:
     return result_df
 
 
-# ──────────────────────────────────────────────
+
 #  Module 5: Frequency Distribution
-# ──────────────────────────────────────────────
 def frequency_distribution(df: pd.DataFrame) -> dict:
     """
     Compute frequency tables for every categorical (non-numeric) column.
@@ -285,9 +261,8 @@ def frequency_distribution(df: pd.DataFrame) -> dict:
     return result
 
 
-# ──────────────────────────────────────────────
+
 #  Module 6: Data Visualization
-# ──────────────────────────────────────────────
 def generate_visualizations(df: pd.DataFrame) -> list[str]:
     """
     Generate and save visualizations for all columns.
@@ -367,9 +342,8 @@ def generate_visualizations(df: pd.DataFrame) -> list[str]:
     return saved_files
 
 
-# ──────────────────────────────────────────────
+
 #  Module 7: Correlation Analysis
-# ──────────────────────────────────────────────
 def correlation_analysis(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute Pearson correlation matrix for numeric columns and
@@ -427,9 +401,8 @@ def correlation_analysis(df: pd.DataFrame) -> pd.DataFrame:
     return corr_matrix
 
 
-# ──────────────────────────────────────────────
+
 #  Module 8: Hypothesis Testing — Independent t-Test
-# ──────────────────────────────────────────────
 def independent_ttest(df: pd.DataFrame) -> dict:
     """
     Perform an Independent Samples t-Test.
@@ -505,9 +478,8 @@ def independent_ttest(df: pd.DataFrame) -> dict:
     return result
 
 
-# ──────────────────────────────────────────────
+
 #  Module 8: Hypothesis Testing — Chi-Square Test
-# ──────────────────────────────────────────────
 def chi_square_test(df: pd.DataFrame) -> dict:
     """
     Perform a Chi-Square Test of Independence.
@@ -559,9 +531,8 @@ def chi_square_test(df: pd.DataFrame) -> dict:
     return result
 
 
-# ──────────────────────────────────────────────
+
 #  Module 9: Automatic Report Generation
-# ──────────────────────────────────────────────
 def generate_report(df: pd.DataFrame) -> str:
     """
     Generate a comprehensive text report and save to reports/analysis_report.txt.
