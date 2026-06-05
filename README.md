@@ -128,7 +128,7 @@ ezAnalysis/
 
 ## Architecture
 
-The entire application is contained in `project.py` as required by CS50P. Despite being a single file, it is organized into highly modular, reusable functions:
+The entire application is contained in `project.py`. Despite being a single file, it is organized into highly modular, reusable functions:
 
 ### Core Functions
 
