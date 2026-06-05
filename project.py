@@ -26,9 +26,7 @@ for d in [DATA_DIR, REPORTS_DIR, PLOTS_DIR, EXPORTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 MENU_TEXT = """
-====================================================
          ezAnalysis — Research Data Analysis Toolkit
-====================================================
 
   1.  Dataset Summary
   2.  Missing Value Analysis
@@ -642,9 +640,8 @@ def generate_report(df: pd.DataFrame) -> str:
     return report_text
 
 
-# ──────────────────────────────────────────────
+
 #  Module 10: Export Results
-# ──────────────────────────────────────────────
 def export_results(df: pd.DataFrame) -> list[str]:
     """
     Export descriptive statistics and frequency tables to CSV files
@@ -709,10 +706,8 @@ def export_results(df: pd.DataFrame) -> list[str]:
 
     return saved
 
-
-# ──────────────────────────────────────────────
+    
 #  Module 9 (Full): Full Automated Analysis
-# ──────────────────────────────────────────────
 def full_automated_analysis(df: pd.DataFrame) -> None:
     """Run all analysis modules sequentially and generate the report."""
     print("\n🚀  Running Full Automated Analysis …\n")
@@ -727,9 +722,8 @@ def full_automated_analysis(df: pd.DataFrame) -> None:
     print("\n✅  Full Automated Analysis Complete!")
 
 
-# ──────────────────────────────────────────────
-#  Helper: calculate_mean (testable utility)
-# ──────────────────────────────────────────────
+
+# Helper: calculate_mean (testable utility)
 def calculate_mean(values: list) -> float:
     """
     Calculate the arithmetic mean of a list of numbers.
@@ -747,10 +741,7 @@ def calculate_mean(values: list) -> float:
         raise ValueError("Cannot calculate mean of an empty list.")
     return sum(values) / len(values)
 
-
-# ──────────────────────────────────────────────
-#  Main Menu
-# ──────────────────────────────────────────────
+# Main Menu
 def main() -> None:
     """Main entry point — interactive CLI menu loop."""
     ensure_directories()
@@ -761,7 +752,7 @@ def main() -> None:
     print("╚══════════════════════════════════════════════════╝")
     print()
 
-    # ---- Load Dataset ----
+    # Load Dataset
     df = None
     while df is None:
         filepath = input("  Enter the path to your CSV file: ").strip()
@@ -776,7 +767,7 @@ def main() -> None:
         except ValueError as e:
             print(f"  ❌  {e}\n")
 
-    # ---- Configure Output Folder ----
+    # Configure Output Folder 
     output_dir = input("\n  Enter a folder path to store analysis results (leave blank for default): ").strip()
     if output_dir:
         global REPORTS_DIR, PLOTS_DIR, EXPORTS_DIR
@@ -790,7 +781,7 @@ def main() -> None:
     else:
         print(f"  ✅  Results will be stored in: {BASE_DIR}\n")
 
-    # ---- Menu Loop ----
+    # Menu Loop 
     while True:
         print(MENU_TEXT)
         choice = input("  Select an option [0-11]: ").strip()
