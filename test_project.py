@@ -1,20 +1,3 @@
-"""
-Test Suite for ezAnalysis — Research Data Analysis Toolkit
-===========================================================
-Uses pytest with mock DataFrames to validate core functions
-without requiring external CSV files.
-
-Tested functions:
-    - load_dataset()
-    - missing_value_analysis()
-    - descriptive_statistics()
-    - frequency_distribution()
-    - correlation_analysis()
-    - dataset_summary()
-    - calculate_mean()
-    - export_results()
-"""
-
 import os
 import tempfile
 from pathlib import Path
@@ -35,9 +18,9 @@ from project import (
 )
 
 
-# ──────────────────────────────────────────────
-#  Fixtures — Reusable Mock Data
-# ──────────────────────────────────────────────
+
+# Fixtures — Reusable Mock Data
+
 @pytest.fixture
 def sample_df():
     """A small DataFrame that mimics a typical CSV input."""
@@ -83,9 +66,9 @@ def temp_csv(sample_df):
     os.unlink(path)  # Cleanup after test
 
 
-# ──────────────────────────────────────────────
-#  Tests: load_dataset()
-# ──────────────────────────────────────────────
+
+# Tests: load_dataset()
+
 class TestLoadDataset:
     """Tests for the dataset loading function."""
 
@@ -127,9 +110,9 @@ class TestLoadDataset:
             os.unlink(path)
 
 
-# ──────────────────────────────────────────────
-#  Tests: missing_value_analysis()
-# ──────────────────────────────────────────────
+
+# Tests: missing_value_analysis()
+
 class TestMissingValueAnalysis:
     """Tests for the missing value analysis function."""
 
@@ -156,9 +139,9 @@ class TestMissingValueAnalysis:
         assert "C" not in result
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: descriptive_statistics()
-# ──────────────────────────────────────────────
+
 class TestDescriptiveStatistics:
     """Tests for the descriptive statistics function."""
 
@@ -196,9 +179,9 @@ class TestDescriptiveStatistics:
         assert result["X"]["Max"] == 50.0
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: frequency_distribution()
-# ──────────────────────────────────────────────
+
 class TestFrequencyDistribution:
     """Tests for the frequency distribution function."""
 
@@ -227,9 +210,9 @@ class TestFrequencyDistribution:
         assert result == {}
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: correlation_analysis()
-# ──────────────────────────────────────────────
+
 class TestCorrelationAnalysis:
     """Tests for the Pearson correlation function."""
 
@@ -258,9 +241,9 @@ class TestCorrelationAnalysis:
         assert result.empty
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: dataset_summary()
-# ──────────────────────────────────────────────
+
 class TestDatasetSummary:
     """Tests for the dataset summary function."""
 
@@ -286,9 +269,9 @@ class TestDatasetSummary:
         assert "Categorical" in summary
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: calculate_mean()
-# ──────────────────────────────────────────────
+
 class TestCalculateMean:
     """Tests for the standalone calculate_mean utility."""
 
@@ -307,9 +290,9 @@ class TestCalculateMean:
             calculate_mean([])
 
 
-# ──────────────────────────────────────────────
+
 #  Tests: export_results()
-# ──────────────────────────────────────────────
+
 class TestExportResults:
     """Tests for the CSV export function."""
 
