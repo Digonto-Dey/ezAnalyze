@@ -126,9 +126,6 @@ ezAnalysis/
 
 ---
 
-## Architecture
-
-The entire application is contained in `project.py`. Despite being a single file, it is organized into highly modular, reusable functions:
 
 ### Core Functions
 
@@ -205,20 +202,3 @@ All tests use **mock DataFrames** created in pytest fixtures — no external dat
 
 ---
 
-## CS50P Requirements Compliance
-
-| Requirement | Implementation |
-|-------------|----------------|
-| **Functions** | 15+ reusable functions with docstrings |
-| **Loops** | Menu navigation loop, column iteration |
-| **Conditionals** | Menu routing, error handling, significance testing |
-| **File I/O** | CSV import, report writing, plot saving, CSV export |
-| **Exceptions** | try-except for FileNotFoundError, KeyError, ValueError |
-| **Libraries** | pandas, numpy, scipy, matplotlib |
-| **Unit Tests** | 28 pytest tests in test_project.py |
-
----
-
-## Acknowledgments
-
-This project was developed as a final project for **CS50P: Introduction to Programming with Python** by Harvard University.
