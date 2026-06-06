@@ -1,10 +1,10 @@
-# ezAnalysis: Research Data Analysis Toolkit
+# ezpzAnalyze: Research Data Analysis Toolkit
 
 #### Video Demo: *\<URL HERE\>*
 
 ## Description
 
-**ezAnalysis** is a terminal-based Python application that performs comprehensive statistical analysis on any user-provided CSV dataset. It is designed as a simplified alternative to tools like SPSS, Stata, or R — entirely from the command line.
+**ezpzAnalyze** is a terminal-based Python application that performs comprehensive statistical analysis on any user-provided CSV dataset. It is designed as a simplified alternative to tools like SPSS, Stata, or R — entirely from the command line.
 
 A user simply runs `python project.py`, points to any CSV file, and can instantly generate descriptive statistics, frequency tables, visualizations, correlation analyses, hypothesis tests, and a complete automated report.
 
@@ -38,7 +38,7 @@ A user simply runs `python project.py`, points to any CSV file, and can instantl
 
 ```bash
 # Clone or download the project
-cd ezAnalysis
+cd ezpzAnalyze
 
 # Install dependencies
 pip install -r requirements.txt
@@ -68,7 +68,7 @@ After loading a dataset, the interactive menu appears:
 
 ```
 ====================================================
-         ezAnalysis — Research Data Analysis Toolkit
+         ezpzAnalyze — Research Data Analysis Toolkit
 ====================================================
 
   1.  Dataset Summary
@@ -99,7 +99,7 @@ After loading a dataset, the interactive menu appears:
 ## Project Structure
 
 ```
-ezAnalysis/
+ezpzAnalyze/
 ├── project.py               # Main application — all 10 analysis modules
 ├── test_project.py           # Pytest test suite (28 tests)
 ├── requirements.txt          # Python dependencies

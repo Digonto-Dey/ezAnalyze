@@ -26,7 +26,7 @@ for d in [DATA_DIR, REPORTS_DIR, PLOTS_DIR, EXPORTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 MENU_TEXT = """
-         ezAnalysis — Research Data Analysis Toolkit
+         ezpzAnalyze — Research Data Analysis Toolkit
 
   1.  Dataset Summary
   2.  Missing Value Analysis
@@ -748,7 +748,7 @@ def main() -> None:
 
     print()
     print("╔══════════════════════════════════════════════════╗")
-    print("║   ezAnalysis — Research Data Analysis Toolkit    ║")
+    print("║   ezpzAnalyze — Research Data Analysis Toolkit    ║")
     print("╚══════════════════════════════════════════════════╝")
     print()
 
@@ -810,7 +810,7 @@ def main() -> None:
             elif choice == "11":
                 export_results(df)
             elif choice == "0":
-                print("\n  👋  Thank you for using ezAnalysis. Goodbye!\n")
+                print("\n  👋  Thank you for using ezpzAnalyze. Goodbye!\n")
                 sys.exit(0)
             else:
                 print("\n  ⚠  Invalid option. Please enter a number between 0 and 11.")
