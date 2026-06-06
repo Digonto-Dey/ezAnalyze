@@ -1,6 +1,6 @@
 # ezpzAnalyze: Research Data Analysis Toolkit
 
-#### Video Demo: *\<URL HERE\>*
+#### Video Demo: *\<https://youtu.be/imI2qQg2ZEE\>*
 
 ## Description
 
