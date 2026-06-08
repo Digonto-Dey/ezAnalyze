@@ -15,6 +15,15 @@ from project import (
     frequency_distribution,
     load_dataset,
     missing_value_analysis,
+    normality_test,
+    one_way_anova,
+    linear_regression,
+    data_cleaning_menu,
+    interactive_filter,
+    _safe_filename,
+    _auto_parse_dates,
+    _remove_outliers_iqr,
+    _remove_outliers_zscore,
 )
 
 
@@ -64,6 +73,25 @@ def temp_csv(sample_df):
         path = f.name
     yield path
     os.unlink(path)  # Cleanup after test
+
+
+@pytest.fixture
+def anova_df():
+    """DataFrame suitable for one-way ANOVA testing."""
+    return pd.DataFrame({
+        "Score": [85, 90, 78, 92, 88, 60, 65, 70, 55, 72, 95, 98, 100, 88, 92],
+        "Group": ["A", "A", "A", "A", "A", "B", "B", "B", "B", "B", "C", "C", "C", "C", "C"],
+    })
+
+
+@pytest.fixture
+def date_df():
+    """DataFrame with a date-like string column for auto-detection testing."""
+    return pd.DataFrame({
+        "event": ["game1", "game2", "game3"],
+        "date": ["2024-01-15", "2024-02-20", "2024-03-10"],
+        "score": [100, 200, 150],
+    })
 
 
 
@@ -209,6 +237,15 @@ class TestFrequencyDistribution:
         result = frequency_distribution(numeric_only_df)
         assert result == {}
 
+    def test_high_cardinality_still_returns_all(self):
+        """Frequency distribution returns ALL values in dict, even if display is capped."""
+        many_cats = pd.DataFrame({
+            "Cat": [f"value_{i}" for i in range(100)]
+        })
+        result = frequency_distribution(many_cats)
+        assert "Cat" in result
+        assert len(result["Cat"]) == 100  # Full result returned
+
 
 
 #  Tests: correlation_analysis()
@@ -309,3 +346,511 @@ class TestExportResults:
         for path_str in saved:
             assert os.path.exists(path_str)
             assert path_str.endswith(".csv")
+
+
+
+#  Tests: normality_test()
+
+class TestNormalityTest:
+    """Tests for the Shapiro-Wilk normality test function."""
+
+    def test_normal_data_detected(self):
+        """Data drawn from a normal distribution should be detected as normal."""
+        np.random.seed(42)
+        df = pd.DataFrame({"Normal": np.random.normal(100, 15, 200)})
+        result = normality_test(df)
+        assert "Normal" in result
+        assert result["Normal"]["normal"] == True
+
+    def test_uniform_data_detected_non_normal(self):
+        """Uniform data should be detected as non-normal."""
+        np.random.seed(42)
+        df = pd.DataFrame({"Uniform": np.random.uniform(0, 100, 200)})
+        result = normality_test(df)
+        assert "Uniform" in result
+        assert result["Uniform"]["normal"] == False
+
+    def test_no_numeric_columns(self):
+        """A DataFrame with no numeric columns returns an empty dict."""
+        df = pd.DataFrame({"Name": ["Alice", "Bob", "Charlie"]})
+        result = normality_test(df)
+        assert result == {}
+
+    def test_too_few_observations_skipped(self):
+        """Columns with fewer than 3 observations should be skipped."""
+        df = pd.DataFrame({"Short": [1.0, 2.0]})
+        result = normality_test(df)
+        assert "Short" not in result
+
+    def test_result_keys(self):
+        """Each result entry should have stat, p_value, normal, test, skewness, kurtosis keys."""
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        result = normality_test(df)
+        assert "stat" in result["X"]       # W (Shapiro) or A² (Anderson)
+        assert "p_value" in result["X"]
+        assert "normal" in result["X"]
+        assert "test" in result["X"]       # 'shapiro' or 'anderson'
+        assert "skewness" in result["X"]
+        assert "kurtosis" in result["X"]
+
+
+
+#  Tests: one_way_anova()
+
+class TestOneWayAnova:
+    """Tests for the one-way ANOVA function."""
+
+    def test_significant_anova(self, anova_df, monkeypatch):
+        """Groups with clearly different means should yield significant F-test."""
+        # Simulate user input: "Score" for numeric, "Group" for grouping
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = one_way_anova(anova_df)
+        assert result["significant"] == True
+        assert result["f_stat"] > 0
+        assert len(result["groups"]) == 3
+
+    def test_non_significant_anova(self, monkeypatch):
+        """Groups with similar means should not be significant."""
+        df = pd.DataFrame({
+            "Value": [10, 11, 10, 11, 10, 11, 10, 11, 10, 11],
+            "Cat": ["A", "A", "A", "A", "A", "B", "B", "B", "B", "B"],
+        })
+        inputs = iter(["Value", "Cat"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = one_way_anova(df)
+        assert result["significant"] == False
+
+    def test_no_numeric_columns(self):
+        """Returns empty dict when no numeric columns exist."""
+        df = pd.DataFrame({"A": ["x", "y"], "B": ["a", "b"]})
+        result = one_way_anova(df)
+        assert result == {}
+
+
+
+#  Tests: data_cleaning_menu()
+
+class TestDataCleaningMenu:
+    """Tests for the data cleaning tools."""
+
+    def test_drop_na(self, missing_df, monkeypatch):
+        """Option 1 should drop rows with missing values."""
+        inputs = iter(["1", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = data_cleaning_menu(missing_df.copy())
+        assert result.isna().sum().sum() == 0
+        assert len(result) == 2  # 5 rows, 3 have at least 1 NaN → 2 remain
+
+    def test_fill_mean(self, missing_df, monkeypatch):
+        """Option 2 should fill numeric NaNs with column mean."""
+        inputs = iter(["2", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = data_cleaning_menu(missing_df.copy())
+        # Column A had NaN — now filled with mean of [1,2,4] = 2.333...
+        assert result["A"].isna().sum() == 0
+
+    def test_fill_median(self, missing_df, monkeypatch):
+        """Option 3 should fill numeric NaNs with column median."""
+        inputs = iter(["3", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = data_cleaning_menu(missing_df.copy())
+        assert result["A"].isna().sum() == 0
+
+    def test_remove_duplicates(self, monkeypatch):
+        """Option 4 should remove duplicate rows."""
+        df = pd.DataFrame({"X": [1, 1, 2, 3], "Y": ["a", "a", "b", "c"]})
+        inputs = iter(["4", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = data_cleaning_menu(df.copy())
+        assert len(result) == 3
+
+    def test_drop_column(self, sample_df, monkeypatch):
+        """Option 5 should drop the specified column."""
+        inputs = iter(["5", "Name", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        result = data_cleaning_menu(sample_df.copy())
+        assert "Name" not in result.columns
+
+
+
+#  Tests: _safe_filename()
+
+class TestSafeFilename:
+    """Tests for the filename sanitization helper."""
+
+    def test_spaces_replaced(self):
+        assert _safe_filename("my column") == "my_column"
+
+    def test_special_chars_replaced(self):
+        assert _safe_filename("col/name\\test") == "col_name_test"
+
+    def test_uppercase_lowered(self):
+        assert _safe_filename("MyColumn") == "mycolumn"
+
+    def test_already_safe(self):
+        assert _safe_filename("simple_name") == "simple_name"
+
+
+
+#  Tests: _auto_parse_dates()
+
+class TestAutoParseDate:
+    """Tests for the automatic date column detection."""
+
+    def test_date_column_detected(self, date_df):
+        """A column with ISO date strings should be converted to datetime."""
+        result = _auto_parse_dates(date_df.copy())
+        assert pd.api.types.is_datetime64_any_dtype(result["date"])
+
+    def test_non_date_column_unchanged(self, date_df):
+        """Non-date string columns should remain as object dtype."""
+        result = _auto_parse_dates(date_df.copy())
+        assert result["event"].dtype == object
+
+    def test_numeric_columns_unchanged(self, date_df):
+        """Numeric columns should not be touched."""
+        result = _auto_parse_dates(date_df.copy())
+        assert pd.api.types.is_numeric_dtype(result["score"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: normality_test() — extended
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNormalityTestExtended:
+    """Extended tests for the robust normality_test function."""
+
+    def test_result_structure(self):
+        """Each result must have required keys."""
+        df = pd.DataFrame({"X": np.random.normal(0, 1, 50)})
+        result = normality_test(df)
+        assert "X" in result
+        for key in ("test", "stat", "p_value", "normal", "skewness", "kurtosis"):
+            assert key in result["X"], f"Missing key: {key}"
+
+    def test_shapiro_used_for_small_n(self):
+        """n ≤ 5000 should use Shapiro-Wilk test."""
+        np.random.seed(0)
+        df = pd.DataFrame({"V": np.random.normal(10, 2, 100)})
+        result = normality_test(df)
+        assert result["V"]["test"] == "shapiro"
+
+    def test_anderson_used_for_large_n(self):
+        """n > 5000 should use Anderson-Darling test."""
+        np.random.seed(1)
+        df = pd.DataFrame({"V": np.random.normal(0, 1, 6000)})
+        result = normality_test(df)
+        assert result["V"]["test"] == "anderson"
+
+    def test_non_normal_skewed_data(self):
+        """Heavily skewed exponential data should be flagged as non-normal."""
+        np.random.seed(42)
+        df = pd.DataFrame({"Exp": np.random.exponential(1, 500)})
+        result = normality_test(df)
+        assert result["Exp"]["normal"] is False
+
+    def test_skewness_and_kurtosis_returned(self):
+        """Skewness and kurtosis values must be numeric floats."""
+        df = pd.DataFrame({"Z": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]})
+        result = normality_test(df)
+        assert isinstance(result["Z"]["skewness"], float)
+        assert isinstance(result["Z"]["kurtosis"], float)
+
+    def test_column_error_isolated(self):
+        """A bad column should not prevent other columns from being tested."""
+        np.random.seed(3)
+        df = pd.DataFrame({
+            "Good": np.random.normal(0, 1, 50),
+            "AllSame": [5.0] * 50,   # zero variance — Shapiro may warn
+        })
+        result = normality_test(df)
+        assert "Good" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: linear_regression() — simple & multiple
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLinearRegression:
+    """Tests for the robust linear_regression function."""
+
+    @pytest.fixture
+    def lr_df(self):
+        np.random.seed(7)
+        x = np.arange(1, 51, dtype=float)
+        return pd.DataFrame({
+            "X":  x,
+            "X2": x + np.random.normal(0, 0.5, 50),
+            "Y":  2.5 * x + 10 + np.random.normal(0, 2, 50),
+        })
+
+    def test_simple_regression_significant(self, lr_df, monkeypatch):
+        """Simple regression on perfectly-correlated data should be significant."""
+        inputs = iter(["Y", "X"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = linear_regression(lr_df)
+        assert result["significant"] is True
+        assert result["r_squared"] > 0.9
+        assert result["k"] == 1
+
+    def test_result_has_required_keys(self, lr_df, monkeypatch):
+        """Result dict must contain all documented keys."""
+        inputs = iter(["Y", "X"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = linear_regression(lr_df)
+        for key in ("y_var", "x_vars", "n", "k", "intercept", "coefficients",
+                    "r_squared", "adj_r_squared", "f_stat", "f_pvalue", "significant"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_multiple_regression(self, lr_df, monkeypatch):
+        """Multiple regression with 2 predictors should run without error."""
+        inputs = iter(["Y", "X, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = linear_regression(lr_df)
+        assert result["k"] == 2
+        assert len(result["coefficients"]) == 2
+        assert "vif" in result and len(result["vif"]) == 2
+
+    def test_not_enough_columns(self):
+        """Single numeric column should return empty dict."""
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0]})
+        result = linear_regression(df)
+        assert result == {}
+
+    def test_insufficient_observations(self, monkeypatch):
+        """Too few rows for regression raises ValueError."""
+        df = pd.DataFrame({"X": [1.0, 2.0], "Y": [1.0, 2.0]})
+        inputs = iter(["Y", "X"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="complete observations"):
+            linear_regression(df)
+
+    def test_y_in_x_raises(self, lr_df, monkeypatch):
+        """Using Y as both dependent and independent variable should raise ValueError."""
+        inputs = iter(["Y", "Y"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="cannot also be"):
+            linear_regression(lr_df)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: one_way_anova() — extended with Levene + Tukey
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestOneWayAnovaExtended:
+    """Extended ANOVA tests including Levene and Tukey results."""
+
+    @pytest.fixture
+    def anova_df(self):
+        return pd.DataFrame({
+            "Score": [85, 90, 78, 92, 88, 60, 65, 70, 55, 72, 95, 98, 100, 88, 92],
+            "Group": ["A"]*5 + ["B"]*5 + ["C"]*5,
+        })
+
+    def test_result_has_levene_keys(self, anova_df, monkeypatch):
+        """Result must include Levene's test keys."""
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = one_way_anova(anova_df)
+        assert "levene_stat" in result
+        assert "levene_p" in result
+        assert "equal_var" in result
+
+    def test_result_has_welch_keys(self, anova_df, monkeypatch):
+        """Result must include Welch ANOVA keys."""
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = one_way_anova(anova_df)
+        assert "welch_f" in result
+        assert "welch_p" in result
+
+    def test_tukey_hsd_present_when_significant(self, anova_df, monkeypatch):
+        """When ANOVA is significant, Tukey HSD comparisons should be populated."""
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = one_way_anova(anova_df)
+        assert result["significant"] is True
+        assert isinstance(result["tukey_hsd"], list)
+        assert len(result["tukey_hsd"]) > 0
+
+    def test_tukey_comparison_keys(self, anova_df, monkeypatch):
+        """Each Tukey comparison dict must have the required keys."""
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = one_way_anova(anova_df)
+        for comp in result["tukey_hsd"]:
+            for key in ("group1", "group2", "mean_diff", "q_stat", "p_approx", "significant"):
+                assert key in comp
+
+    def test_group_stats_present(self, anova_df, monkeypatch):
+        """Result must include per-group descriptive stats."""
+        inputs = iter(["Score", "Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = one_way_anova(anova_df)
+        assert "group_stats" in result
+        for g in ["A", "B", "C"]:
+            assert g in result["group_stats"]
+            assert "mean" in result["group_stats"][g]
+            assert "n" in result["group_stats"][g]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: data_cleaning_menu() — new options
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDataCleaningMenuExtended:
+    """Tests for the new data cleaning options (6–11)."""
+
+    @pytest.fixture
+    def clean_df(self):
+        return pd.DataFrame({
+            "A": [1.0, 2.0, 3.0, 100.0, 4.0],   # 100.0 is an outlier
+            "B": ["yes", "no", None, "yes", "no"],  # categorical with NaN
+            "C": ["  alice ", " bob", "carol ", "dave", " eve "],  # whitespace
+        })
+
+    def test_fill_categorical_mode(self, clean_df, monkeypatch):
+        """Option 6 fills categorical NaN with mode."""
+        inputs = iter(["6", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(clean_df.copy())
+        assert result["B"].isna().sum() == 0
+
+    def test_remove_outliers_iqr_option(self, clean_df, monkeypatch):
+        """Option 7 removes IQR outliers from numeric column."""
+        inputs = iter(["7", "A", "1.5", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(clean_df.copy())
+        assert 100.0 not in result["A"].values
+
+    def test_remove_outliers_zscore_option(self, clean_df, monkeypatch):
+        """Option 8 removes Z-score outliers from numeric column."""
+        inputs = iter(["8", "A", "2.0", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(clean_df.copy())
+        assert 100.0 not in result["A"].values
+
+    def test_rename_column(self, clean_df, monkeypatch):
+        """Option 9 renames a column."""
+        inputs = iter(["9", "A", "NumericA", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(clean_df.copy())
+        assert "NumericA" in result.columns
+        assert "A" not in result.columns
+
+    def test_strip_whitespace(self, clean_df, monkeypatch):
+        """Option 10 strips whitespace from string columns."""
+        inputs = iter(["10", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(clean_df.copy())
+        # All values in C should be stripped
+        non_null = result["C"].dropna()
+        for val in non_null:
+            assert val == val.strip()
+
+    def test_cast_column(self, monkeypatch):
+        """Option 11 casts a numeric column to float."""
+        df = pd.DataFrame({"Num": ["1", "2", "3"], "Cat": ["a", "b", "c"]})
+        inputs = iter(["11", "Num", "float", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = data_cleaning_menu(df.copy())
+        assert pd.api.types.is_float_dtype(result["Num"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: _remove_outliers_iqr() and _remove_outliers_zscore()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestOutlierRemoval:
+    """Unit tests for outlier removal utility functions."""
+
+    @pytest.fixture
+    def outlier_df(self):
+        return pd.DataFrame({"X": [1.0, 2.0, 3.0, 4.0, 5.0, 1000.0]})
+
+    def test_iqr_removes_extreme_outlier(self, outlier_df):
+        result = _remove_outliers_iqr(outlier_df, "X")
+        assert 1000.0 not in result["X"].values
+
+    def test_iqr_keeps_normal_values(self, outlier_df):
+        result = _remove_outliers_iqr(outlier_df, "X")
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0]:
+            assert v in result["X"].values
+
+    def test_zscore_removes_extreme_outlier(self, outlier_df):
+        result = _remove_outliers_zscore(outlier_df, "X", threshold=2.0)
+        assert 1000.0 not in result["X"].values
+
+    def test_zscore_keeps_normal_values(self, outlier_df):
+        result = _remove_outliers_zscore(outlier_df, "X", threshold=3.0)
+        assert 2.0 in result["X"].values
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: interactive_filter()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestInteractiveFilter:
+    """Tests for the robust interactive filtering function."""
+
+    @pytest.fixture
+    def filter_df(self):
+        return pd.DataFrame({
+            "Name":   ["Alice", "Bob", "Carol", "Dave", "Eve"],
+            "Age":    [25, 30, 22, 35, 28],
+            "City":   ["NYC", "LA", "NYC", "Chicago", "LA"],
+        })
+
+    def test_exact_value_filter(self, filter_df, monkeypatch):
+        """Option 1: exact value filter should return only matching rows."""
+        inputs = iter(["1", "City", "NYC", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert all(result["City"] == "NYC")
+        assert len(result) == 2
+
+    def test_numeric_range_filter(self, filter_df, monkeypatch):
+        """Option 2: numeric range filter should keep rows within [25, 35]."""
+        inputs = iter(["2", "Age", "25", "35", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert result["Age"].min() >= 25
+        assert result["Age"].max() <= 35
+
+    def test_string_contains_filter(self, filter_df, monkeypatch):
+        """Option 3: contains filter should keep rows where City contains 'LA'."""
+        inputs = iter(["3", "City", "1", "LA", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert all(result["City"] == "LA")
+
+    def test_reset_filter(self, filter_df, monkeypatch):
+        """Option 5: reset should restore original dataset."""
+        inputs = iter(["1", "City", "NYC", "5", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert len(result) == len(filter_df)
+
+    def test_multi_condition_and(self, filter_df, monkeypatch):
+        """Option 4: AND filter with Age>=28 AND City==LA should return [Bob, Eve]."""
+        inputs = iter(["4", "Age>=28, City==LA", "0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert len(result) == 2
+        assert set(result["Name"].values) == {"Bob", "Eve"}
+
+    def test_returns_dataframe(self, filter_df, monkeypatch):
+        """interactive_filter always returns a DataFrame."""
+        inputs = iter(["0"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = interactive_filter(filter_df.copy(), filter_df.copy())
+        assert isinstance(result, pd.DataFrame)
+
