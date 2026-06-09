@@ -110,10 +110,12 @@ MENU_TEXT = f"""
   10.  Linear Regression  (Simple & Multiple)
   11.  One-Way ANOVA  (+ Levene + Tukey HSD)
   12.  Data Cleaning Tools
-  13.  Interactive Filtering{Style.RESET_ALL}
-{Fore.YELLOW}  14.  Full Automated Analysis
-  15.  Generate Report
-  16.  Export Results{Style.RESET_ALL}
+  13.  Interactive Filtering
+  14.  Multiple Regression Test  (formal hypothesis testing)
+  15.  Logistic Regression  (binary outcome){Style.RESET_ALL}
+{Fore.YELLOW}  16.  Full Automated Analysis
+  17.  Generate Report
+  18.  Export Results{Style.RESET_ALL}
 {Fore.RED}   0.  Exit{Style.RESET_ALL}
 
 {Fore.CYAN}===================================================={Style.RESET_ALL}
@@ -1083,6 +1085,687 @@ def linear_regression(df: pd.DataFrame) -> dict:
         print(f"    {_c_ok('✓ Regression plot saved: ' + plot_path.name)}")
     except Exception as plot_err:
         print("    " + _c_warn(f"⊘ Plot failed: {plot_err}"))
+
+    print(_c_header("━" * 54))
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Module 10b: Multiple Regression Test  (formal hypothesis testing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _dummy_encode(df: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, list[str]]:
+    """
+    One-hot encode categorical columns (drop-first to avoid multicollinearity).
+
+    Args:
+        df:      Source DataFrame.
+        columns: List of categorical column names to encode.
+
+    Returns:
+        (encoded_df, new_column_names) — DataFrame with dummies appended and
+        original categorical columns removed, plus list of new dummy column names.
+    """
+    new_cols: list[str] = []
+    result = df.copy()
+    for col in columns:
+        dummies = pd.get_dummies(result[col], prefix=col, drop_first=True, dtype=float)
+        new_cols.extend(dummies.columns.tolist())
+        result = pd.concat([result, dummies], axis=1)
+        result = result.drop(columns=[col])
+    return result, new_cols
+
+
+def multiple_regression_test(df: pd.DataFrame) -> dict:
+    """
+    Perform a formal Multiple Regression hypothesis test with diagnostics.
+
+    The user chooses:
+        - One Y (dependent) numeric variable
+        - Two or more X (independent) variables (numeric or categorical)
+        - Categorical X variables are automatically dummy-encoded
+
+    Diagnostics beyond basic linear regression:
+        - Standardized (beta) coefficients
+        - 95% confidence intervals for each coefficient
+        - Durbin-Watson statistic (autocorrelation in residuals)
+        - Jarque-Bera normality test on residuals
+        - Condition number (multicollinearity indicator)
+        - 4-panel diagnostic plot (Residuals vs Fitted, Normal Q-Q,
+          Scale-Location, Residuals vs Leverage)
+
+    Returns:
+        dict with full regression results + diagnostics.
+    """
+    numeric_cols_list = _numeric_cols(df)
+    cat_cols_list = _cat_cols(df)
+    all_available = numeric_cols_list + cat_cols_list
+
+    if len(numeric_cols_list) < 2 and len(all_available) < 3:
+        print(f"\n{_c_warn('⚠  Need at least 1 numeric Y and 2 X variables for multiple regression test.')}")
+        return {}
+
+    y_var = _pick_column(df, "Enter the dependent variable (Y) — must be numeric", kind="numeric")
+
+    remaining = [c for c in all_available if c != y_var]
+    print(f"\n  {_c_title('Available X variables (numeric + categorical):')}")
+    for c in remaining:
+        kind = "numeric" if c in numeric_cols_list else "categorical"
+        print(f"    • {c}  ({kind})")
+    raw = input("  Enter two or more independent variable(s) (X), comma-separated: ").strip()
+    x_vars = [v.strip() for v in raw.split(",") if v.strip()]
+
+    if len(x_vars) < 2:
+        raise ValueError("Multiple regression test requires at least 2 independent variables.")
+
+    for v in x_vars:
+        if v not in df.columns:
+            raise KeyError(f"Column '{v}' not found in the dataset.")
+    if y_var in x_vars:
+        raise ValueError("The dependent variable Y cannot also be an independent variable.")
+
+    # Separate numeric and categorical X variables
+    cat_x = [v for v in x_vars if v in cat_cols_list]
+    num_x = [v for v in x_vars if v in numeric_cols_list]
+
+    # Prepare data: select columns and drop NaN
+    cols_used = [y_var] + x_vars
+    clean = df[cols_used].dropna()
+
+    # Dummy-encode categorical X variables
+    if cat_x:
+        clean, dummy_cols = _dummy_encode(clean, cat_x)
+        final_x_names = num_x + dummy_cols
+    else:
+        final_x_names = num_x
+
+    if len(clean) < len(final_x_names) + 2:
+        raise ValueError(
+            f"Need at least {len(final_x_names) + 2} complete observations for regression "
+            f"with {len(final_x_names)} predictor(s) (after encoding)."
+        )
+
+    y = clean[y_var].values.astype(float)
+    Xm = clean[final_x_names].values.astype(float)
+
+    # Design matrix with intercept
+    n = len(y)
+    k = len(final_x_names)
+    ones = np.ones((n, 1))
+    X_des = np.hstack([ones, Xm])
+
+    # OLS: β = (X'X)⁻¹ X'y
+    try:
+        XtX_inv = np.linalg.inv(X_des.T @ X_des)
+    except np.linalg.LinAlgError:
+        XtX_inv = np.linalg.pinv(X_des.T @ X_des)
+
+    beta = XtX_inv @ X_des.T @ y
+    y_hat = X_des @ beta
+    resid = y - y_hat
+
+    ss_res = float(np.sum(resid ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    adj_r2 = 1.0 - (1.0 - r_squared) * (n - 1) / (n - k - 1) if n > k + 1 else float("nan")
+    mse = ss_res / (n - k - 1) if n > k + 1 else float("nan")
+    df_resid = n - k - 1
+
+    # Coefficient standard errors and t-statistics
+    var_beta = mse * XtX_inv if not np.isnan(mse) else np.full_like(XtX_inv, np.nan)
+    se_beta = np.sqrt(np.diag(var_beta))
+    t_stats = beta / se_beta
+    p_vals = [2 * (1 - stats.t.cdf(abs(t), df_resid)) for t in t_stats]
+
+    # 95% Confidence intervals
+    t_crit = stats.t.ppf(0.975, df_resid) if df_resid > 0 else float("nan")
+    ci_lower = beta - t_crit * se_beta
+    ci_upper = beta + t_crit * se_beta
+
+    # Standardized (beta) coefficients
+    y_std = np.std(y, ddof=1)
+    x_stds = np.std(Xm, axis=0, ddof=1)
+    std_coefs = np.array([
+        beta[i + 1] * (x_stds[i] / y_std) if y_std > 0 and x_stds[i] > 0 else 0.0
+        for i in range(k)
+    ])
+
+    # F-statistic
+    ss_model = ss_tot - ss_res
+    if ss_model > 0 and mse > 0:
+        f_stat = (ss_model / k) / mse
+        f_pval = 1.0 - stats.f.cdf(f_stat, k, n - k - 1)
+    else:
+        f_stat, f_pval = float("nan"), float("nan")
+
+    # VIF
+    vif_vals = _vif(X_des) if k >= 2 else np.array([1.0] * k)
+
+    # Durbin-Watson statistic
+    diff_resid = np.diff(resid)
+    dw_stat = float(np.sum(diff_resid ** 2) / ss_res) if ss_res > 0 else float("nan")
+
+    # Jarque-Bera normality test on residuals
+    n_resid = len(resid)
+    skew_resid = float(stats.skew(resid))
+    kurt_resid = float(stats.kurtosis(resid))
+    jb_stat = (n_resid / 6.0) * (skew_resid ** 2 + (kurt_resid ** 2) / 4.0)
+    jb_pval = float(1.0 - stats.chi2.cdf(jb_stat, 2))
+
+    # Condition number
+    try:
+        cond_number = float(np.linalg.cond(X_des))
+    except Exception:
+        cond_number = float("nan")
+
+    result = {
+        "y_var":          y_var,
+        "x_vars":         x_vars,
+        "x_vars_encoded": final_x_names,
+        "n":              n,
+        "k":              k,
+        "intercept":      round(float(beta[0]), 6),
+        "coefficients":   {final_x_names[i]: round(float(beta[i + 1]), 6) for i in range(k)},
+        "std_errors":     {final_x_names[i]: round(float(se_beta[i + 1]), 6) for i in range(k)},
+        "t_stats":        {final_x_names[i]: round(float(t_stats[i + 1]), 4) for i in range(k)},
+        "p_values":       {final_x_names[i]: round(float(p_vals[i + 1]), 6) for i in range(k)},
+        "std_coefs":      {final_x_names[i]: round(float(std_coefs[i]), 6) for i in range(k)},
+        "ci_lower":       {final_x_names[i]: round(float(ci_lower[i + 1]), 6) for i in range(k)},
+        "ci_upper":       {final_x_names[i]: round(float(ci_upper[i + 1]), 6) for i in range(k)},
+        "r_squared":      round(r_squared, 6),
+        "adj_r_squared":  round(adj_r2, 6) if not np.isnan(adj_r2) else None,
+        "f_stat":         round(f_stat, 4) if not np.isnan(f_stat) else None,
+        "f_pvalue":       round(f_pval, 6) if not np.isnan(f_pval) else None,
+        "mse":            round(mse, 6) if not np.isnan(mse) else None,
+        "significant":    (f_pval < ALPHA) if not np.isnan(f_pval) else False,
+        "vif":            {final_x_names[i]: round(float(vif_vals[i]), 4) for i in range(k)},
+        "durbin_watson":  round(dw_stat, 4) if not np.isnan(dw_stat) else None,
+        "jb_stat":        round(jb_stat, 4),
+        "jb_pvalue":      round(jb_pval, 6),
+        "resid_normal":   jb_pval > ALPHA,
+        "cond_number":    round(cond_number, 2) if not np.isnan(cond_number) else None,
+    }
+
+    # ── Print results ──────────────────────────────────────────────────────
+    _print_banner("MULTIPLE REGRESSION TEST")
+    eq_parts = " + ".join(f"{round(beta[i+1], 4)}·{final_x_names[i]}" for i in range(k))
+    print(f"    {_c_title('Model:')}  Y = {round(beta[0], 4)} + {eq_parts}")
+    print(f"    n = {n},  predictors = {k}")
+    if cat_x:
+        print(f"    {_c_info('Categorical predictors dummy-encoded: ' + ', '.join(cat_x))}")
+    _print_result_row("R²", result["r_squared"])
+    if result["adj_r_squared"] is not None:
+        _print_result_row("Adj R²", result["adj_r_squared"])
+    if result["f_stat"] is not None:
+        _print_result_row("F-stat", result["f_stat"])
+    if result["f_pvalue"] is not None:
+        _print_result_row("F p-value", result["f_pvalue"])
+
+    print(f"\n  {_c_title('Coefficient Table:')}")
+    print(f"    {'Variable':<22s}  {'Coef':>10s}  {'Std Err':>10s}  {'t':>8s}  {'p':>8s}  {'β':>8s}  {'95% CI':>20s}")
+    print(f"    {'─'*22}  {'─'*10}  {'─'*10}  {'─'*8}  {'─'*8}  {'─'*8}  {'─'*20}")
+
+    # Intercept row
+    sig_mark = _c_ok("*") if p_vals[0] < ALPHA else " "
+    print(f"    {'(Intercept)':<22s}  {beta[0]:>10.4f}  {se_beta[0]:>10.4f}  "
+          f"{t_stats[0]:>8.4f}  {p_vals[0]:>8.4f}  {'—':>8s}  "
+          f"[{ci_lower[0]:.4f}, {ci_upper[0]:.4f}]  {sig_mark}")
+
+    for i in range(k):
+        name = final_x_names[i]
+        sig_mark = _c_ok("*") if p_vals[i + 1] < ALPHA else " "
+        print(f"    {name:<22s}  {beta[i+1]:>10.4f}  {se_beta[i+1]:>10.4f}  "
+              f"{t_stats[i+1]:>8.4f}  {p_vals[i+1]:>8.4f}  {std_coefs[i]:>8.4f}  "
+              f"[{ci_lower[i+1]:.4f}, {ci_upper[i+1]:.4f}]  {sig_mark}")
+
+    print(f"\n  {_c_title('VIF (multicollinearity):')}")
+    for xv, v in result["vif"].items():
+        flag = _c_warn(" ⚠ HIGH") if v > 10 else ""
+        print(f"    {xv:<22s}  VIF = {v:.4f}{flag}")
+
+    print(f"\n  {_c_title('Residual Diagnostics:')}")
+    _print_result_row("Durbin-Watson", result["durbin_watson"])
+    if result["durbin_watson"] is not None:
+        if result["durbin_watson"] < 1.5:
+            print(f"    {_c_warn('⚠ Positive autocorrelation detected (DW < 1.5)')}")
+        elif result["durbin_watson"] > 2.5:
+            print(f"    {_c_warn('⚠ Negative autocorrelation detected (DW > 2.5)')}")
+        else:
+            print(f"    {_c_ok('✓ No significant autocorrelation (1.5 < DW < 2.5)')}")
+
+    _print_result_row("Jarque-Bera", result["jb_stat"])
+    _print_result_row("JB p-value", result["jb_pvalue"])
+    if result["resid_normal"]:
+        print(f"    {_c_ok('✓ Residuals appear normally distributed')}")
+    else:
+        print(f"    {_c_warn('⚠ Residuals may not be normally distributed')}")
+
+    _print_result_row("Cond. Number", result["cond_number"])
+    if result["cond_number"] is not None and result["cond_number"] > 30:
+        print(f"    {_c_warn('⚠ High condition number — possible multicollinearity')}")
+
+    if result["significant"]:
+        print(f"\n    {_c_ok('✅ Model is statistically significant (F-test)')}")
+    else:
+        print(f"\n    {_c_err('✗ Model is NOT statistically significant (F-test)')}")
+
+    # ── 4-Panel Diagnostic Plot ────────────────────────────────────────────
+    try:
+        ensure_directories()
+        fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+
+        # 1. Residuals vs Fitted
+        axes[0, 0].scatter(y_hat, resid, alpha=0.5, color="#4A90D9", edgecolors="#2C3E50", s=25)
+        axes[0, 0].axhline(0, color="#E74C3C", linewidth=1.5, linestyle="--")
+        axes[0, 0].set_title("Residuals vs Fitted", fontsize=12, fontweight="bold")
+        axes[0, 0].set_xlabel("Fitted values", fontsize=10)
+        axes[0, 0].set_ylabel("Residuals", fontsize=10)
+        axes[0, 0].grid(alpha=0.3)
+
+        # 2. Normal Q-Q
+        (osm, osr), (slope, intercept_qq, _r) = stats.probplot(resid, dist="norm")
+        axes[0, 1].scatter(osm, osr, alpha=0.5, s=15, color="#4A90D9")
+        axes[0, 1].plot(osm, slope * np.array(osm) + intercept_qq,
+                        color="#E74C3C", linewidth=1.5)
+        axes[0, 1].set_title("Normal Q-Q", fontsize=12, fontweight="bold")
+        axes[0, 1].set_xlabel("Theoretical Quantiles", fontsize=10)
+        axes[0, 1].set_ylabel("Standardized Residuals", fontsize=10)
+        axes[0, 1].grid(alpha=0.3)
+
+        # 3. Scale-Location
+        std_resid = resid / np.std(resid) if np.std(resid) > 0 else resid
+        sqrt_abs_resid = np.sqrt(np.abs(std_resid))
+        axes[1, 0].scatter(y_hat, sqrt_abs_resid, alpha=0.5, color="#4A90D9",
+                           edgecolors="#2C3E50", s=25)
+        axes[1, 0].set_title("Scale-Location", fontsize=12, fontweight="bold")
+        axes[1, 0].set_xlabel("Fitted values", fontsize=10)
+        axes[1, 0].set_ylabel("√|Standardized Residuals|", fontsize=10)
+        axes[1, 0].grid(alpha=0.3)
+
+        # 4. Residuals vs Leverage
+        hat_matrix = X_des @ XtX_inv @ X_des.T
+        leverage = np.diag(hat_matrix)
+        axes[1, 1].scatter(leverage, std_resid, alpha=0.5, color="#4A90D9",
+                           edgecolors="#2C3E50", s=25)
+        axes[1, 1].axhline(0, color="#E74C3C", linewidth=1, linestyle="--")
+        axes[1, 1].set_title("Residuals vs Leverage", fontsize=12, fontweight="bold")
+        axes[1, 1].set_xlabel("Leverage", fontsize=10)
+        axes[1, 1].set_ylabel("Standardized Residuals", fontsize=10)
+        axes[1, 1].grid(alpha=0.3)
+
+        fig.suptitle(f"Multiple Regression Diagnostics — {y_var}", fontsize=14, fontweight="bold")
+        safe_xvars = "_".join(_safe_filename(v) for v in x_vars[:3])
+        plot_path = PLOTS_DIR / f"multreg_diag_{_safe_filename(y_var)}_vs_{safe_xvars}.png"
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        print(f"    {_c_ok('✓ Diagnostic plot saved: ' + plot_path.name)}")
+    except Exception as plot_err:
+        print("    " + _c_warn(f"⊘ Diagnostic plot failed: {plot_err}"))
+
+    print(_c_header("━" * 54))
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Module 10c: Logistic Regression  (binary outcome)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    """Numerically stable sigmoid function."""
+    z = np.clip(z, -500, 500)
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def logistic_regression(df: pd.DataFrame) -> dict:
+    """
+    Perform Logistic Regression for binary outcome prediction.
+
+    The user chooses:
+        - One Y (dependent) variable — must be binary (2 unique values)
+        - One or more X (independent) variables (numeric or categorical)
+        - Categorical X variables are automatically dummy-encoded
+
+    Algorithm:
+        - Iteratively Reweighted Least Squares (IRLS) for MLE
+        - Wald test for individual coefficient significance
+        - Likelihood ratio test for overall model significance
+
+    Outputs:
+        - Coefficient table: coef, std error, z-stat, p-value, odds ratio, 95% CI
+        - Model summary: Log-likelihood, AIC, BIC, Pseudo-R² (McFadden)
+        - Confusion matrix + classification metrics (Accuracy, Precision, Recall, F1)
+        - ROC curve saved to plots/
+
+    Returns:
+        dict with all logistic regression results.
+    """
+    # Identify columns that could be binary dependent variables
+    all_cols = df.columns.tolist()
+    binary_cols = []
+    for col in all_cols:
+        nuniq = df[col].dropna().nunique()
+        if nuniq == 2:
+            binary_cols.append(col)
+
+    if not binary_cols:
+        print(f"\n{_c_warn('⚠  No binary columns found for logistic regression.')}")
+        print(f"    {_c_dim('Logistic regression requires a dependent variable with exactly 2 unique values.')}")
+        return {}
+
+    print(f"\n  {_c_title('Binary columns available as Y:')}")
+    for c in binary_cols:
+        vals = df[c].dropna().unique()
+        print(f"    • {c}  (values: {', '.join(str(v) for v in vals)})")
+    y_var = input("  Enter the dependent variable (Y) — must be binary: ").strip()
+
+    if y_var not in df.columns:
+        raise KeyError(f"Column '{y_var}' not found in the dataset.")
+    if df[y_var].dropna().nunique() != 2:
+        raise ValueError(f"Column '{y_var}' has {df[y_var].dropna().nunique()} unique values — "
+                         f"exactly 2 are required for logistic regression.")
+
+    # Determine available X variables
+    numeric_cols_list = _numeric_cols(df)
+    cat_cols_list = _cat_cols(df)
+    available_x = [c for c in (numeric_cols_list + cat_cols_list) if c != y_var]
+
+    if not available_x:
+        print(f"\n{_c_warn('⚠  No predictor variables available.')}")
+        return {}
+
+    print(f"\n  {_c_title('Available X variables (numeric + categorical):')}")
+    for c in available_x:
+        kind = "numeric" if c in numeric_cols_list else "categorical"
+        print(f"    • {c}  ({kind})")
+    raw = input("  Enter independent variable(s) (X), comma-separated: ").strip()
+    x_vars = [v.strip() for v in raw.split(",") if v.strip()]
+
+    if not x_vars:
+        raise ValueError("At least one independent variable must be specified.")
+
+    for v in x_vars:
+        if v not in df.columns:
+            raise KeyError(f"Column '{v}' not found in the dataset.")
+    if y_var in x_vars:
+        raise ValueError("The dependent variable Y cannot also be an independent variable.")
+
+    # Separate numeric and categorical X
+    cat_x = [v for v in x_vars if v in cat_cols_list]
+    num_x = [v for v in x_vars if v in numeric_cols_list]
+    # Variables that are numeric but also in x_vars (in case user picks a binary numeric as X)
+    remaining_x = [v for v in x_vars if v not in cat_x and v not in num_x]
+    if remaining_x:
+        # Check if they are numeric (could be binary numeric)
+        for v in remaining_x:
+            if pd.api.types.is_numeric_dtype(df[v]):
+                num_x.append(v)
+            else:
+                cat_x.append(v)
+
+    # Prepare data
+    cols_used = [y_var] + x_vars
+    clean = df[cols_used].dropna()
+
+    # Encode Y to 0/1
+    y_raw = clean[y_var]
+    unique_vals = sorted(y_raw.unique(), key=str)
+    if pd.api.types.is_numeric_dtype(y_raw) and set(y_raw.unique()).issubset({0, 1, 0.0, 1.0}):
+        y = y_raw.values.astype(float)
+        y_labels = {0: "0", 1: "1"}
+    else:
+        # Map first alphabetical value to 0, second to 1
+        y_map = {unique_vals[0]: 0, unique_vals[1]: 1}
+        y = y_raw.map(y_map).values.astype(float)
+        y_labels = {0: str(unique_vals[0]), 1: str(unique_vals[1])}
+        print(f"    {_c_info(f'Encoding: {unique_vals[0]} → 0,  {unique_vals[1]} → 1')}")
+
+    # Dummy-encode categorical X variables
+    if cat_x:
+        clean, dummy_cols = _dummy_encode(clean, cat_x)
+        final_x_names = num_x + dummy_cols
+    else:
+        final_x_names = num_x
+
+    if len(clean) < len(final_x_names) + 2:
+        raise ValueError(
+            f"Need at least {len(final_x_names) + 2} complete observations "
+            f"with {len(final_x_names)} predictor(s)."
+        )
+
+    Xm = clean[final_x_names].values.astype(float)
+    n = len(y)
+    k = len(final_x_names)
+
+    # Design matrix with intercept
+    ones = np.ones((n, 1))
+    X_des = np.hstack([ones, Xm])
+
+    # ── IRLS (Iteratively Reweighted Least Squares) ────────────────────────
+    beta = np.zeros(k + 1)
+    max_iter = 100
+    tol = 1e-8
+    converged = False
+
+    for iteration in range(max_iter):
+        z = X_des @ beta
+        p_hat = _sigmoid(z)
+        # Clamp to avoid log(0)
+        p_hat = np.clip(p_hat, 1e-10, 1 - 1e-10)
+
+        # Weight matrix diagonal
+        W_diag = p_hat * (1 - p_hat)
+
+        # Working response
+        working_resid = y - p_hat
+
+        # Weighted least squares update: β_new = β + (X'WX)⁻¹ X' (y - p)
+        XtWX = X_des.T @ (X_des * W_diag[:, np.newaxis])
+        try:
+            XtWX_inv = np.linalg.inv(XtWX)
+        except np.linalg.LinAlgError:
+            XtWX_inv = np.linalg.pinv(XtWX)
+
+        delta = XtWX_inv @ (X_des.T @ working_resid)
+        beta_new = beta + delta
+
+        if np.max(np.abs(delta)) < tol:
+            converged = True
+            beta = beta_new
+            break
+        beta = beta_new
+
+    # Final predictions
+    z_final = X_des @ beta
+    p_final = _sigmoid(z_final)
+    p_final = np.clip(p_final, 1e-10, 1 - 1e-10)
+
+    # ── Standard errors via Fisher Information ─────────────────────────────
+    W_final = p_final * (1 - p_final)
+    XtWX_final = X_des.T @ (X_des * W_final[:, np.newaxis])
+    try:
+        cov_matrix = np.linalg.inv(XtWX_final)
+    except np.linalg.LinAlgError:
+        cov_matrix = np.linalg.pinv(XtWX_final)
+
+    se_beta = np.sqrt(np.maximum(np.diag(cov_matrix), 0))
+    z_stats = beta / np.where(se_beta > 0, se_beta, 1e-10)
+    p_vals = [2 * (1 - stats.norm.cdf(abs(z))) for z in z_stats]
+
+    # Odds ratios
+    odds_ratios = np.exp(beta)
+
+    # 95% CI for coefficients
+    ci_lower = beta - 1.96 * se_beta
+    ci_upper = beta + 1.96 * se_beta
+
+    # 95% CI for odds ratios
+    or_ci_lower = np.exp(ci_lower)
+    or_ci_upper = np.exp(ci_upper)
+
+    # ── Model fit statistics ───────────────────────────────────────────────
+    # Log-likelihood
+    log_lik = float(np.sum(y * np.log(p_final) + (1 - y) * np.log(1 - p_final)))
+
+    # Null model log-likelihood (intercept only)
+    p_null = y.mean()
+    p_null = np.clip(p_null, 1e-10, 1 - 1e-10)
+    log_lik_null = float(n * (p_null * np.log(p_null) + (1 - p_null) * np.log(1 - p_null)))
+
+    # Pseudo-R² (McFadden)
+    pseudo_r2 = 1.0 - (log_lik / log_lik_null) if log_lik_null != 0 else 0.0
+
+    # AIC and BIC
+    aic = -2 * log_lik + 2 * (k + 1)
+    bic = -2 * log_lik + np.log(n) * (k + 1)
+
+    # Likelihood ratio test (overall model)
+    lr_stat = -2 * (log_lik_null - log_lik)
+    lr_pval = float(1.0 - stats.chi2.cdf(lr_stat, k))
+
+    # ── Confusion matrix ───────────────────────────────────────────────────
+    y_pred = (p_final >= 0.5).astype(int)
+    tp = int(np.sum((y_pred == 1) & (y == 1)))
+    tn = int(np.sum((y_pred == 0) & (y == 0)))
+    fp = int(np.sum((y_pred == 1) & (y == 0)))
+    fn = int(np.sum((y_pred == 0) & (y == 1)))
+
+    accuracy = (tp + tn) / n if n > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1_score = (2 * precision * recall / (precision + recall)
+                if (precision + recall) > 0 else 0.0)
+
+    result = {
+        "y_var":           y_var,
+        "x_vars":          x_vars,
+        "x_vars_encoded":  final_x_names,
+        "y_labels":        y_labels,
+        "n":               n,
+        "k":               k,
+        "converged":       converged,
+        "intercept":       round(float(beta[0]), 6),
+        "coefficients":    {final_x_names[i]: round(float(beta[i + 1]), 6) for i in range(k)},
+        "std_errors":      {final_x_names[i]: round(float(se_beta[i + 1]), 6) for i in range(k)},
+        "z_stats":         {final_x_names[i]: round(float(z_stats[i + 1]), 4) for i in range(k)},
+        "p_values":        {final_x_names[i]: round(float(p_vals[i + 1]), 6) for i in range(k)},
+        "odds_ratios":     {final_x_names[i]: round(float(odds_ratios[i + 1]), 6) for i in range(k)},
+        "ci_lower":        {final_x_names[i]: round(float(ci_lower[i + 1]), 6) for i in range(k)},
+        "ci_upper":        {final_x_names[i]: round(float(ci_upper[i + 1]), 6) for i in range(k)},
+        "log_likelihood":  round(log_lik, 4),
+        "log_lik_null":    round(log_lik_null, 4),
+        "pseudo_r2":       round(pseudo_r2, 6),
+        "aic":             round(aic, 4),
+        "bic":             round(bic, 4),
+        "lr_stat":         round(lr_stat, 4),
+        "lr_pvalue":       round(lr_pval, 6),
+        "significant":     lr_pval < ALPHA,
+        "confusion_matrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+        "accuracy":        round(accuracy, 6),
+        "precision":       round(precision, 6),
+        "recall":          round(recall, 6),
+        "f1_score":        round(f1_score, 6),
+    }
+
+    # ── Print results ──────────────────────────────────────────────────────
+    _print_banner("LOGISTIC REGRESSION")
+    print(f"    {_c_title('Y variable:')} {y_var}  ({y_labels[0]} = 0, {y_labels[1]} = 1)")
+    print(f"    n = {n},  predictors = {k}")
+    if cat_x:
+        print(f"    {_c_info('Categorical predictors dummy-encoded: ' + ', '.join(cat_x))}")
+    if not converged:
+        print(f"    {_c_warn('⚠ IRLS did not converge within 100 iterations')}")
+
+    print(f"\n  {_c_title('Model Fit:')}")
+    _print_result_row("Log-Likelihood", result["log_likelihood"])
+    _print_result_row("Null LL", result["log_lik_null"])
+    _print_result_row("Pseudo R²", result["pseudo_r2"])
+    _print_result_row("AIC", result["aic"])
+    _print_result_row("BIC", result["bic"])
+    _print_result_row("LR χ²", result["lr_stat"])
+    _print_result_row("LR p-value", result["lr_pvalue"])
+
+    print(f"\n  {_c_title('Coefficient Table:')}")
+    print(f"    {'Variable':<22s}  {'Coef':>10s}  {'SE':>10s}  {'z':>8s}  {'p':>8s}  "
+          f"{'OR':>10s}  {'95% CI (coef)':>20s}")
+    print(f"    {'─'*22}  {'─'*10}  {'─'*10}  {'─'*8}  {'─'*8}  {'─'*10}  {'─'*20}")
+
+    # Intercept row
+    sig_mark = _c_ok("*") if p_vals[0] < ALPHA else " "
+    print(f"    {'(Intercept)':<22s}  {beta[0]:>10.4f}  {se_beta[0]:>10.4f}  "
+          f"{z_stats[0]:>8.4f}  {p_vals[0]:>8.4f}  {odds_ratios[0]:>10.4f}  "
+          f"[{ci_lower[0]:.4f}, {ci_upper[0]:.4f}]  {sig_mark}")
+
+    for i in range(k):
+        name = final_x_names[i]
+        sig_mark = _c_ok("*") if p_vals[i + 1] < ALPHA else " "
+        print(f"    {name:<22s}  {beta[i+1]:>10.4f}  {se_beta[i+1]:>10.4f}  "
+              f"{z_stats[i+1]:>8.4f}  {p_vals[i+1]:>8.4f}  {odds_ratios[i+1]:>10.4f}  "
+              f"[{ci_lower[i+1]:.4f}, {ci_upper[i+1]:.4f}]  {sig_mark}")
+
+    print(f"\n  {_c_title('Classification Results (threshold = 0.5):')}")
+    print(f"    {'':>20s}  Predicted 0  Predicted 1")
+    print(f"    {'Actual 0':<20s}  {tn:>11d}  {fp:>11d}")
+    print(f"    {'Actual 1':<20s}  {fn:>11d}  {tp:>11d}")
+    print()
+    _print_result_row("Accuracy", f"{accuracy:.4f}")
+    _print_result_row("Precision", f"{precision:.4f}")
+    _print_result_row("Recall", f"{recall:.4f}")
+    _print_result_row("F1-Score", f"{f1_score:.4f}")
+
+    if result["significant"]:
+        print(f"\n    {_c_ok('✅ Model is statistically significant (LR test)')}")
+    else:
+        print(f"\n    {_c_err('✗ Model is NOT statistically significant (LR test)')}")
+
+    # ── ROC Curve ──────────────────────────────────────────────────────────
+    try:
+        ensure_directories()
+        # Compute ROC manually
+        thresholds = np.linspace(0, 1, 201)
+        tpr_list = []
+        fpr_list = []
+        for thresh in thresholds:
+            yp = (p_final >= thresh).astype(int)
+            tp_t = np.sum((yp == 1) & (y == 1))
+            fn_t = np.sum((yp == 0) & (y == 1))
+            fp_t = np.sum((yp == 1) & (y == 0))
+            tn_t = np.sum((yp == 0) & (y == 0))
+            tpr_t = tp_t / (tp_t + fn_t) if (tp_t + fn_t) > 0 else 0.0
+            fpr_t = fp_t / (fp_t + tn_t) if (fp_t + tn_t) > 0 else 0.0
+            tpr_list.append(tpr_t)
+            fpr_list.append(fpr_t)
+
+        # AUC via trapezoidal rule (sort by FPR)
+        fpr_arr = np.array(fpr_list)
+        tpr_arr = np.array(tpr_list)
+        sort_idx = np.argsort(fpr_arr)
+        fpr_sorted = fpr_arr[sort_idx]
+        tpr_sorted = tpr_arr[sort_idx]
+        auc_val = float(np.trapz(tpr_sorted, fpr_sorted))
+
+        fig, ax = plt.subplots(figsize=(7, 6))
+        ax.plot(fpr_sorted, tpr_sorted, color="#4A90D9", linewidth=2,
+                label=f"ROC Curve (AUC = {auc_val:.4f})")
+        ax.plot([0, 1], [0, 1], color="#95A5A6", linewidth=1, linestyle="--",
+                label="Random Classifier")
+        ax.set_title(f"ROC Curve — {y_var}", fontsize=13, fontweight="bold")
+        ax.set_xlabel("False Positive Rate", fontsize=11)
+        ax.set_ylabel("True Positive Rate", fontsize=11)
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.3)
+        ax.set_xlim(-0.02, 1.02)
+        ax.set_ylim(-0.02, 1.02)
+
+        roc_path = PLOTS_DIR / f"logistic_roc_{_safe_filename(y_var)}.png"
+        fig.tight_layout()
+        fig.savefig(roc_path, dpi=150)
+        plt.close(fig)
+        result["auc"] = round(auc_val, 6)
+        print(f"\n    AUC = {_c_accent(f'{auc_val:.4f}')}")
+        print(f"    {_c_ok('✓ ROC curve saved: ' + roc_path.name)}")
+    except Exception as plot_err:
+        print("    " + _c_warn(f"⊘ ROC plot failed: {plot_err}"))
 
     print(_c_header("━" * 54))
     return result
@@ -2101,7 +2784,7 @@ def main() -> None:
     # Menu Loop
     while True:
         print(MENU_TEXT)
-        choice = input(f"  {_c_title('Select an option [0-16]:')} ").strip()
+        choice = input(f"  {_c_title('Select an option [0-18]:')} ").strip()
 
         try:
             if choice == "1":
@@ -2131,16 +2814,20 @@ def main() -> None:
             elif choice == "13":
                 df = interactive_filter(df, original_df)
             elif choice == "14":
-                full_automated_analysis(df)
+                multiple_regression_test(df)
             elif choice == "15":
-                generate_report(df)
+                logistic_regression(df)
             elif choice == "16":
+                full_automated_analysis(df)
+            elif choice == "17":
+                generate_report(df)
+            elif choice == "18":
                 export_results(df)
             elif choice == "0":
                 print(f"\n  {_c_info('👋  Thank you for using ezpzAnalyze. Goodbye!')}\n")
                 sys.exit(0)
             else:
-                print(f"\n  {_c_warn('⚠  Invalid option. Please enter a number between 0 and 16.')}")
+                print(f"\n  {_c_warn('⚠  Invalid option. Please enter a number between 0 and 18.')}")
         except KeyError as e:
             print("\n  " + _c_err(f"❌  Column Error: {e}"))
         except ValueError as e:

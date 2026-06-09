@@ -21,9 +21,11 @@ A user simply runs `python project.py`, points to any CSV file, and can instantl
 | 5 | **Frequency Distribution** | Frequency and percentage tables for all categorical columns |
 | 6 | **Data Visualization** | Auto-generated histograms, boxplots, and bar charts saved as PNG |
 | 7 | **Correlation Analysis** | Pearson correlation matrix with r-values, p-values, and a heatmap |
-| 8 | **Hypothesis Testing** | Independent Samples t-Test and Chi-Square Test of Independence |
-| 9 | **Full Automated Analysis** | Runs all modules at once — one-click complete analysis |
-| 10 | **Report & Export** | Text report to `reports/` and CSV exports to `exports/` |
+| 8 | **Hypothesis Testing** | Independent t-Test, Chi-Square Test, Normality Test, ANOVA |
+| 9 | **Regression Analysis** | Linear Regression, Multiple Regression Test, Logistic Regression |
+| 10 | **Data Processing** | Data Cleaning Tools and Interactive Filtering |
+| 11 | **Full Automated Analysis** | Runs all descriptive modules at once |
+| 12 | **Report & Export** | Text report to `reports/` and CSV exports to `exports/` |
 
 ---
 
@@ -79,9 +81,16 @@ After loading a dataset, the interactive menu appears:
   6.  Correlation Analysis
   7.  Independent t-Test
   8.  Chi-Square Test
-  9.  Full Automated Analysis
- 10.  Generate Report
- 11.  Export Results
+  9.  Normality Test (Shapiro-Wilk / Anderson-Darling)
+ 10.  Linear Regression  (Simple & Multiple)
+ 11.  One-Way ANOVA  (+ Levene + Tukey HSD)
+ 12.  Data Cleaning Tools
+ 13.  Interactive Filtering
+ 14.  Multiple Regression Test  (formal hypothesis testing)
+ 15.  Logistic Regression  (binary outcome)
+ 16.  Full Automated Analysis
+ 17.  Generate Report
+ 18.  Export Results
   0.  Exit
 
 ====================================================
@@ -91,8 +100,11 @@ After loading a dataset, the interactive menu appears:
 
 ### Hypothesis Testing
 
-- **Independent t-Test (Option 7):** You will be asked to select a numeric variable (e.g., `GPA`) and a grouping variable with exactly 2 groups (e.g., `Gender`).
-- **Chi-Square Test (Option 8):** You will be asked to select two categorical variables (e.g., `Gender` and `Smoking`).
+- **Independent t-Test:** You will be asked to select a numeric variable and a grouping variable with exactly 2 groups.
+- **Chi-Square Test:** You will be asked to select two categorical variables.
+- **ANOVA:** Compares means across 3+ groups and performs Tukey HSD post-hoc testing.
+- **Multiple Regression Test:** Provides detailed coefficients, p-values, VIF, and a 4-panel diagnostic plot.
+- **Logistic Regression:** Classifies a binary outcome (e.g., Yes/No, 0/1) generating an ROC curve and confusion matrix.
 
 ---
 
@@ -142,7 +154,14 @@ ezpzAnalyze/
 | `correlation_analysis(df)` | Pearson correlations with heatmap |
 | `independent_ttest(df)` | Interactive independent samples t-test |
 | `chi_square_test(df)` | Interactive chi-square test of independence |
-| `full_automated_analysis(df)` | Runs all modules sequentially |
+| `normality_test(df)` | Shapiro-Wilk and Anderson-Darling tests |
+| `linear_regression(df)` | Basic Simple/Multiple OLS Regression |
+| `one_way_anova(df)` | ANOVA with Levene's test and Tukey HSD |
+| `data_cleaning_menu(df)` | Tools for imputation and outlier removal |
+| `interactive_filter(df)` | Filters data based on user-defined criteria |
+| `multiple_regression_test(df)`| Advanced multiple regression with diagnostics |
+| `logistic_regression(df)`| Binary outcome prediction with IRLS and ROC |
+| `full_automated_analysis(df)` | Runs all descriptive modules sequentially |
 | `generate_report(df)` | Writes a comprehensive text report |
 | `export_results(df)` | Exports statistics to CSV files |
 | `calculate_mean(values)` | Standalone utility for arithmetic mean |
@@ -162,30 +181,8 @@ The application uses `try-except` blocks to handle:
 
 ---
 
-## Testing
 
-### Running Tests
 
-```bash
-pytest test_project.py -v
-```
-
-### Test Coverage
-
-The test suite contains **28 tests** across 8 test classes:
-
-| Test Class | Tests | What It Validates |
-|------------|-------|-------------------|
-| `TestLoadDataset` | 4 | Valid CSV loading, FileNotFoundError, invalid formats, empty files |
-| `TestMissingValueAnalysis` | 3 | Missing counts, percentages, complete column exclusion |
-| `TestDescriptiveStatistics` | 6 | Mean, median, SD (ddof=1), variance (ddof=1), range, min/max |
-| `TestFrequencyDistribution` | 3 | Correct counts, percentage summation, empty result handling |
-| `TestCorrelationAnalysis` | 3 | Perfect positive, perfect negative, single-column edge case |
-| `TestDatasetSummary` | 4 | Variable names, row count, type labels |
-| `TestCalculateMean` | 4 | Basic mean, single value, floats, empty list error |
-| `TestExportResults` | 1 | File creation and CSV format validation |
-
-All tests use **mock DataFrames** created in pytest fixtures — no external data files are required.
 
 ---
 

@@ -18,12 +18,16 @@ from project import (
     normality_test,
     one_way_anova,
     linear_regression,
+    multiple_regression_test,
+    logistic_regression,
     data_cleaning_menu,
     interactive_filter,
     _safe_filename,
     _auto_parse_dates,
     _remove_outliers_iqr,
     _remove_outliers_zscore,
+    _dummy_encode,
+    _sigmoid,
 )
 
 
@@ -853,4 +857,278 @@ class TestInteractiveFilter:
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
         result = interactive_filter(filter_df.copy(), filter_df.copy())
         assert isinstance(result, pd.DataFrame)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: _dummy_encode() and _sigmoid()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestHelperFunctions:
+    """Tests for the new helper utilities."""
+
+    def test_dummy_encode_basic(self):
+        """Dummy encoding should create binary columns with drop-first."""
+        df = pd.DataFrame({
+            "Color": ["Red", "Blue", "Green", "Red", "Blue"],
+            "Size": [1, 2, 3, 4, 5],
+        })
+        encoded, new_cols = _dummy_encode(df, ["Color"])
+        assert "Color" not in encoded.columns
+        assert len(new_cols) == 2  # 3 categories, drop-first → 2
+        assert "Size" in encoded.columns
+
+    def test_dummy_encode_preserves_rows(self):
+        """Row count should not change after encoding."""
+        df = pd.DataFrame({"Cat": ["A", "B", "C", "A"], "X": [1, 2, 3, 4]})
+        encoded, _ = _dummy_encode(df, ["Cat"])
+        assert len(encoded) == 4
+
+    def test_sigmoid_basic(self):
+        """Sigmoid of 0 should be 0.5."""
+        result = _sigmoid(np.array([0.0]))
+        assert abs(result[0] - 0.5) < 1e-10
+
+    def test_sigmoid_large_positive(self):
+        """Sigmoid of large positive should be near 1."""
+        result = _sigmoid(np.array([100.0]))
+        assert result[0] > 0.99
+
+    def test_sigmoid_large_negative(self):
+        """Sigmoid of large negative should be near 0."""
+        result = _sigmoid(np.array([-100.0]))
+        assert result[0] < 0.01
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: multiple_regression_test()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMultipleRegressionTest:
+    """Tests for the multiple_regression_test function."""
+
+    @pytest.fixture
+    def multreg_df(self):
+        np.random.seed(42)
+        n = 60
+        x1 = np.random.normal(50, 10, n)
+        x2 = np.random.normal(30, 5, n)
+        y = 3.0 * x1 + 2.0 * x2 + 10 + np.random.normal(0, 5, n)
+        return pd.DataFrame({
+            "Y": y, "X1": x1, "X2": x2,
+            "X3": np.random.normal(0, 1, n),  # irrelevant predictor
+            "Category": np.random.choice(["A", "B", "C"], n),
+        })
+
+    def test_significant_model(self, multreg_df, monkeypatch):
+        """Multiple regression with correlated data should be significant."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        assert result["significant"] is True
+        assert result["r_squared"] > 0.8
+
+    def test_result_has_required_keys(self, multreg_df, monkeypatch):
+        """Result dict must contain all documented diagnostic keys."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        for key in ("y_var", "x_vars", "x_vars_encoded", "n", "k",
+                    "intercept", "coefficients", "std_errors", "t_stats",
+                    "p_values", "std_coefs", "ci_lower", "ci_upper",
+                    "r_squared", "adj_r_squared", "f_stat", "f_pvalue",
+                    "significant", "vif", "durbin_watson", "jb_stat",
+                    "jb_pvalue", "resid_normal", "cond_number"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_enforces_minimum_2_predictors(self, multreg_df, monkeypatch):
+        """Specifying only 1 predictor should raise ValueError."""
+        inputs = iter(["Y", "X1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="at least 2"):
+            multiple_regression_test(multreg_df)
+
+    def test_handles_categorical_predictors(self, multreg_df, monkeypatch):
+        """Including a categorical predictor should dummy-encode it."""
+        inputs = iter(["Y", "X1, Category"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        # Should have more encoded variables than original x_vars
+        assert result["k"] >= 2
+        assert len(result["x_vars_encoded"]) >= 2
+
+    def test_y_in_x_raises_error(self, multreg_df, monkeypatch):
+        """Y variable cannot also be an X variable."""
+        inputs = iter(["Y", "X1, Y"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="cannot also be"):
+            multiple_regression_test(multreg_df)
+
+    def test_vif_present_for_multiple(self, multreg_df, monkeypatch):
+        """VIF should be computed for multiple predictors."""
+        inputs = iter(["Y", "X1, X2, X3"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        assert len(result["vif"]) == 3
+        for v in result["vif"].values():
+            assert v >= 1.0  # VIF is always ≥ 1
+
+    def test_durbin_watson_range(self, multreg_df, monkeypatch):
+        """Durbin-Watson should be between 0 and 4."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        assert 0 <= result["durbin_watson"] <= 4
+
+    def test_confidence_intervals(self, multreg_df, monkeypatch):
+        """Lower CI should be less than upper CI for all coefficients."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = multiple_regression_test(multreg_df)
+        for var in result["x_vars_encoded"]:
+            assert result["ci_lower"][var] < result["ci_upper"][var]
+
+    def test_not_enough_columns(self):
+        """A DataFrame with only 1 numeric column should return empty dict."""
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0]})
+        result = multiple_regression_test(df)
+        assert result == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Tests: logistic_regression()
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLogisticRegression:
+    """Tests for the logistic_regression function."""
+
+    @pytest.fixture
+    def logistic_df_numeric(self):
+        """DataFrame with binary 0/1 outcome and separable data."""
+        np.random.seed(42)
+        n = 100
+        x1 = np.concatenate([np.random.normal(2, 1, n // 2),
+                             np.random.normal(-2, 1, n // 2)])
+        x2 = np.concatenate([np.random.normal(1, 0.5, n // 2),
+                             np.random.normal(-1, 0.5, n // 2)])
+        y = np.array([1] * (n // 2) + [0] * (n // 2))
+        return pd.DataFrame({"Y": y, "X1": x1, "X2": x2})
+
+    @pytest.fixture
+    def logistic_df_categorical(self):
+        """DataFrame with binary categorical outcome."""
+        np.random.seed(42)
+        n = 80
+        x1 = np.concatenate([np.random.normal(5, 1, n // 2),
+                             np.random.normal(-5, 1, n // 2)])
+        y = ["Pass"] * (n // 2) + ["Fail"] * (n // 2)
+        return pd.DataFrame({"Result": y, "Score": x1,
+                             "Group": np.random.choice(["A", "B"], n)})
+
+    def test_binary_numeric_outcome(self, logistic_df_numeric, monkeypatch):
+        """Logistic regression with 0/1 outcome should work."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        assert result["n"] == 100
+        assert result["k"] == 2
+        assert result["converged"] is True
+
+    def test_binary_categorical_outcome(self, logistic_df_categorical, monkeypatch):
+        """Logistic regression with Pass/Fail outcome should auto-encode."""
+        inputs = iter(["Result", "Score"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_categorical)
+        assert result["y_var"] == "Result"
+        assert "0" in str(result["y_labels"]) or "Fail" in str(result["y_labels"])
+
+    def test_auto_encodes_categorical_predictors(self, logistic_df_categorical, monkeypatch):
+        """Categorical X variables should be dummy-encoded."""
+        inputs = iter(["Result", "Score, Group"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_categorical)
+        assert result["k"] >= 2  # Score + at least 1 dummy for Group
+
+    def test_result_has_required_keys(self, logistic_df_numeric, monkeypatch):
+        """Result dict must contain all documented keys."""
+        inputs = iter(["Y", "X1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        for key in ("y_var", "x_vars", "x_vars_encoded", "y_labels",
+                    "n", "k", "converged", "intercept", "coefficients",
+                    "std_errors", "z_stats", "p_values", "odds_ratios",
+                    "ci_lower", "ci_upper", "log_likelihood", "pseudo_r2",
+                    "aic", "bic", "lr_stat", "lr_pvalue", "significant",
+                    "confusion_matrix", "accuracy", "precision",
+                    "recall", "f1_score"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_significant_model(self, logistic_df_numeric, monkeypatch):
+        """Model with separable data should be significant."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        assert result["significant"] is True
+
+    def test_non_significant_model(self, monkeypatch):
+        """Model with random data should not be significant."""
+        np.random.seed(99)
+        df = pd.DataFrame({
+            "Y": np.random.choice([0, 1], 50),
+            "X": np.random.normal(0, 1, 50),
+        })
+        inputs = iter(["Y", "X"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(df)
+        assert result["significant"] is False
+
+    def test_non_binary_y_raises_error(self, monkeypatch):
+        """A Y variable with more than 2 unique values should raise ValueError."""
+        df = pd.DataFrame({
+            "Y": ["A", "B", "C", "A", "B"],
+            "X": [1, 2, 3, 4, 5],
+        })
+        inputs = iter(["Y", "X"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="exactly 2"):
+            logistic_regression(df)
+
+    def test_single_predictor_works(self, logistic_df_numeric, monkeypatch):
+        """Logistic regression with a single predictor should work."""
+        inputs = iter(["Y", "X1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        assert result["k"] == 1
+        assert len(result["coefficients"]) == 1
+
+    def test_classification_metrics_valid(self, logistic_df_numeric, monkeypatch):
+        """Accuracy, precision, recall, F1 should all be in [0, 1]."""
+        inputs = iter(["Y", "X1, X2"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        for metric in ("accuracy", "precision", "recall", "f1_score"):
+            assert 0.0 <= result[metric] <= 1.0, f"{metric} = {result[metric]}"
+
+    def test_confusion_matrix_sums_to_n(self, logistic_df_numeric, monkeypatch):
+        """Confusion matrix elements should sum to n."""
+        inputs = iter(["Y", "X1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        result = logistic_regression(logistic_df_numeric)
+        cm = result["confusion_matrix"]
+        assert cm["tp"] + cm["tn"] + cm["fp"] + cm["fn"] == result["n"]
+
+    def test_no_binary_columns_returns_empty(self):
+        """A DataFrame with no binary columns should return empty dict."""
+        df = pd.DataFrame({
+            "A": [1, 2, 3, 4, 5],
+            "B": ["x", "y", "z", "w", "v"],
+        })
+        result = logistic_regression(df)
+        assert result == {}
+
+    def test_y_in_x_raises_error(self, logistic_df_numeric, monkeypatch):
+        """Y variable cannot also be an X variable."""
+        inputs = iter(["Y", "X1, Y"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        with pytest.raises(ValueError, match="cannot also be"):
+            logistic_regression(logistic_df_numeric)
 
